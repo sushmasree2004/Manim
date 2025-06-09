@@ -1,0 +1,10 @@
+fastapi==0.115.0
+uvicorn[standard]==0.24.0
+langchain-google-genai==2.1.5
+python-dotenv==1.0.0
+python-multipart==0.0.6
+manim==0.18.1
+pycairo==1.25.1
+langchain-community
+google-genai==1.19.0
+anyio>=3.7.1,<5.0.0

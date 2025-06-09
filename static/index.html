@@ -1,0 +1,229 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Manim Video Generator</title>
+    <style>
+        body { font-family: Arial, sans-serif; background: #f6f6f6; }
+        .container { max-width: 900px; margin: 40px auto; background: white; padding: 30px; border-radius: 8px; box-shadow: 0 2px 10px #0001; display: flex; }
+        .main-content { flex: 2; margin-right: 30px; }
+        .side-panel { flex: 1; background: #f9f9f9; border-radius: 8px; padding: 20px; min-width: 250px; max-width: 300px; box-shadow: 0 1px 4px #0001; }
+        h1 { text-align: center; }
+        textarea { width: 100%; height: 80px; margin-bottom: 10px; font-size: 16px; }
+        button { padding: 10px 20px; background: #007bff; color: white; border: none; border-radius: 4px; cursor: pointer; font-size: 16px; }
+        .loading { color: #007bff; font-weight: bold; margin-top: 10px; }
+        .error { color: #c00; background: #fee; padding: 10px; border-radius: 4px; margin-top: 10px; }
+        .success { color: #070; background: #efe; padding: 10px; border-radius: 4px; margin-top: 10px; }
+        video { width: 100%; margin-top: 20px; border-radius: 4px; background: #222; }
+        .examples { margin-top: 16px; background: #f2f2f2; padding: 12px; border-radius: 5px; }
+        .example-prompt { color: #007bff; cursor: pointer; margin: 4px 0; text-decoration: underline; }
+        .example-prompt:hover { color: #0056b3; }
+        .video-list { margin-top: 10px; max-height: 350px; overflow-y: auto; }
+        .video-item { display: flex; align-items: center; margin-bottom: 10px; }
+        .video-item label { flex: 1; margin-left: 8px; font-size: 14px; }
+        .side-panel h2 { font-size: 18px; margin-bottom: 10px; }
+        .merge-btn { width: 100%; margin-top: 10px; }
+        .video-section { margin-bottom: 20px; }
+        .merged-videos { background: #e8f4ff; padding: 15px; border-radius: 6px; }
+        .original-videos { background: #f9f9f9; padding: 15px; border-radius: 6px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="main-content">
+            <h1>Manim Video Generator</h1>
+            <form id="promptForm">
+                <textarea name="prompt" placeholder="Describe your animation (e.g., Create a rotating square)" required></textarea>
+                <button type="submit">Generate Video</button>
+            </form>
+            <div class="examples">
+                <strong>Example prompts (click to use):</strong>
+                <div class="example-prompt" onclick="setPrompt('Create a blue circle that grows and changes color to red')">
+                    Create a blue circle that grows and changes color to red
+                </div>
+                <div class="example-prompt" onclick="setPrompt('Show a mathematical equation that appears letter by letter')">
+                    Show a mathematical equation that appears letter by letter
+                </div>
+                <div class="example-prompt" onclick="setPrompt('Create a rotating square that transforms into a triangle')">
+                    Create a rotating square that transforms into a triangle
+                </div>
+                <div class="example-prompt" onclick="setPrompt('Draw a simple graph with animated axes')">
+                    Draw a simple graph with animated axes
+                </div>
+            </div>
+            <div id="result"></div>
+            <video id="video" controls style="display:none;"></video>
+            <div id="mergeResult"></div>
+            <video id="mergedVideo" controls style="display:none;"></video>
+        </div>
+        <div class="side-panel">
+            <h2>Your Videos</h2>
+            <form id="videoListForm">
+                <div class="video-section">
+                    <h3>Original Videos</h3>
+                    <div class="video-list original-videos" id="originalVideoList"></div>
+                </div>
+                <div class="video-section">
+                    <h3>Merged Videos</h3>
+                    <div class="video-list merged-videos" id="mergedVideoList"></div>
+                </div>
+                <button type="submit" class="merge-btn">Merge Selected Videos</button>
+            </form>
+        </div>
+    </div>
+    <script>
+        // Store video history in localStorage for persistence
+        function getVideoHistory() {
+            return JSON.parse(localStorage.getItem('videoHistory') || '[]');
+        }
+        function setVideoHistory(history) {
+            localStorage.setItem('videoHistory', JSON.stringify(history));
+        }
+        function addVideoToHistory(prompt, video_url, video_path) {
+            const history = getVideoHistory();
+            history.push({ prompt, video_url, video_path });
+            setVideoHistory(history);
+        }
+        function renderVideoList() {
+            const originalVideoList = document.getElementById('originalVideoList');
+            const mergedVideoList = document.getElementById('mergedVideoList');
+            const history = getVideoHistory();
+            
+            originalVideoList.innerHTML = '';
+            mergedVideoList.innerHTML = '';
+            
+            if (history.length === 0) {
+                originalVideoList.innerHTML = '<div style="color:#888;">No videos generated yet.</div>';
+                mergedVideoList.innerHTML = '<div style="color:#888;">No merged videos yet.</div>';
+                return;
+            }
+
+            history.forEach((item, idx) => {
+                const div = document.createElement('div');
+                div.className = 'video-item';
+                div.innerHTML = `<input type="checkbox" name="videoSelect" value="${item.video_path}"><label title="${item.prompt}">${item.prompt.length > 40 ? item.prompt.slice(0, 40) + '...' : item.prompt}</label><button type="button" class="delete-btn" data-idx="${idx}" style="margin-left:8px;padding:2px 8px;font-size:12px;background:#c00;">Delete</button>`;
+                
+                if (item.prompt.startsWith('Merged video')) {
+                    mergedVideoList.appendChild(div);
+                } else {
+                    originalVideoList.appendChild(div);
+                }
+            });
+
+            // Add delete event listeners
+            document.querySelectorAll('.delete-btn').forEach(btn => {
+                btn.onclick = async function() {
+                    const idx = parseInt(this.getAttribute('data-idx'));
+                    const history = getVideoHistory();
+                    const video = history[idx];
+                    if (!video) return;
+                    if (!confirm('Delete this video?')) return;
+                    // Call backend to delete
+                    try {
+                        const res = await fetch('/delete_video', {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ video_path: video.video_path })
+                        });
+                        const data = await res.json();
+                        if (data.success) {
+                            history.splice(idx, 1);
+                            setVideoHistory(history);
+                            renderVideoList();
+                        } else {
+                            alert('Failed to delete: ' + (data.error || 'Unknown error'));
+                        }
+                    } catch (err) {
+                        alert('Network error: ' + err.message);
+                    }
+                };
+            });
+        }
+        function setPrompt(text) {
+            document.querySelector('textarea[name="prompt"]').value = text;
+        }
+        document.getElementById("promptForm").onsubmit = async (e) => {
+            e.preventDefault();
+            const formData = new FormData(e.target);
+            const resultDiv = document.getElementById("result");
+            const video = document.getElementById("video");
+            resultDiv.innerHTML = '<div class="loading">Generating video, please wait...</div>';
+            video.style.display = "none";
+            try {
+                const res = await fetch("/generate", { method: "POST", body: formData });
+                const data = await res.json();
+                if (data.success) {
+                    resultDiv.innerHTML = '<div class="success">Video generated!</div>';
+                    video.src = data.video_url;
+                    video.style.display = "block";
+                    // Save to history
+                    addVideoToHistory(formData.get('prompt'), data.video_url, data.video_url.split('=')[1]);
+                    renderVideoList();
+                } else {
+                    resultDiv.innerHTML = '<div class="error">Error: ' + data.error + '</div>';
+                }
+            } catch (error) {
+                resultDiv.innerHTML = '<div class="error">Network error: ' + error.message + '</div>';
+            }
+        }
+        document.getElementById("videoListForm").onsubmit = async (e) => {
+            e.preventDefault();
+            const mergeResultDiv = document.getElementById("mergeResult");
+            const mergedVideo = document.getElementById("mergedVideo");
+            mergeResultDiv.innerHTML = '';
+            mergedVideo.style.display = "none";
+            const selected = Array.from(document.querySelectorAll('input[name="videoSelect"]:checked')).map(cb => cb.value);
+            if (selected.length < 2) {
+                mergeResultDiv.innerHTML = '<div class="error">Select at least two videos to merge.</div>';
+                return;
+            }
+            mergeResultDiv.innerHTML = '<div class="loading">Merging selected videos, please wait...</div>';
+            try {
+                const res = await fetch("/merge_videos", {
+                    method: "POST",
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ video_paths: selected })
+                });
+                const data = await res.json();
+                if (data.success) {
+                    mergeResultDiv.innerHTML = '<div class="success">Merged video generated!</div>';
+                    mergedVideo.src = data.video_url;
+                    mergedVideo.style.display = "block";
+                    // Add merged video to history
+                    const mergedPrompt = `Merged video (${selected.length} videos)`;
+                    addVideoToHistory(mergedPrompt, data.video_url, data.video_url.split('=')[1]);
+                    renderVideoList();
+                } else {
+                    mergeResultDiv.innerHTML = '<div class="error">Error: ' + data.error + '</div>';
+                }
+            } catch (error) {
+                mergeResultDiv.innerHTML = '<div class="error">Network error: ' + error.message + '</div>';
+            }
+        }
+
+        // Add click handlers for video items
+        function addVideoClickHandlers() {
+            document.querySelectorAll('.video-item label').forEach(label => {
+                label.style.cursor = 'pointer';
+                label.onclick = function() {
+                    const videoPath = this.previousElementSibling.value;
+                    const video = document.getElementById('video');
+                    video.src = `/video?file=${videoPath}`;
+                    video.style.display = 'block';
+                    // Scroll to video
+                    video.scrollIntoView({ behavior: 'smooth' });
+                };
+            });
+        }
+
+        // Initial render
+        renderVideoList();
+        addVideoClickHandlers();
+
+        // Update click handlers when video list changes
+        const observer = new MutationObserver(addVideoClickHandlers);
+        observer.observe(document.getElementById('originalVideoList'), { childList: true });
+        observer.observe(document.getElementById('mergedVideoList'), { childList: true });
+    </script>
+</body>
+</html>
